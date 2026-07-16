@@ -1,11 +1,15 @@
+# app/repositories/history_repository.py
+
+from __future__ import annotations
+
 import json
 
 from asyncpg import Pool
 
 from app.sql import (
-    INSERT_HISTORY_LOG,
-    INSERT_HISTORY_CITATION,
     GET_HISTORY_WITH_CITATIONS,
+    INSERT_HISTORY_CITATION,
+    INSERT_HISTORY_LOG,
 )
 
 
@@ -15,7 +19,10 @@ class HistoryRepository:
     conversation history.
     """
 
-    def __init__(self, db_pool: Pool):
+    def __init__(
+        self,
+        db_pool: Pool,
+    ) -> None:
         self.pool = db_pool
 
     async def save_conversation(
@@ -26,16 +33,16 @@ class HistoryRepository:
         citations: list[dict],
     ) -> str:
         """
-        Save conversation along with citations.
+        Save a conversation along with all retrieved citations.
         """
 
         print("\n" + "=" * 80)
         print("SAVE CONVERSATION")
         print("=" * 80)
-        print(f"Session ID : {session_id}")
-        print(f"Question   : {question}")
-        print(f"Answer     : {answer}")
-        print(f"Total Citations : {len(citations)}")
+        print(f"Session ID       : {session_id}")
+        print(f"Question         : {question}")
+        print(f"Answer           : {answer}")
+        print(f"Total Citations  : {len(citations)}")
 
         async with self.pool.acquire() as conn:
 
@@ -86,33 +93,50 @@ class HistoryRepository:
     async def get_session_history(
         self,
         session_id: str,
+        document_id: str,
     ) -> list[dict]:
         """
-        Fetch complete conversation history.
+        Retrieve conversation history only for the selected document.
+
+        Args:
+            session_id:
+                Current chat session.
+
+            document_id:
+                Currently selected PDF/document.
+
+        Returns:
+            List of conversation history records with citations.
         """
+
+        print("\n" + "=" * 80)
+        print("FETCH HISTORY")
+        print("=" * 80)
+        print(f"Session ID  : {session_id}")
+        print(f"Document ID : {document_id}")
+        print("=" * 80)
 
         async with self.pool.acquire() as conn:
 
             records = await conn.fetch(
                 GET_HISTORY_WITH_CITATIONS,
                 session_id,
+                document_id,
             )
 
-        history = []
+        history: list[dict] = []
 
-        print("\n" + "=" * 80)
-        print("FETCH HISTORY")
-        print("=" * 80)
-
-        for record in records:
+        for index, record in enumerate(records, start=1):
 
             row = dict(record)
 
-            if isinstance(row["citations"], str):
+            if isinstance(row.get("citations"), str):
                 row["citations"] = json.loads(
                     row["citations"]
                 )
 
+            print(f"\nConversation {index}")
+            print("-" * 80)
             print(
                 json.dumps(
                     row,
@@ -123,6 +147,7 @@ class HistoryRepository:
 
             history.append(row)
 
+        print("\nTotal Conversations :", len(history))
         print("=" * 80 + "\n")
 
         return history

@@ -1,6 +1,9 @@
 # app/api/v1/history_controller.py
 
+from __future__ import annotations
+
 from pprint import pprint
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
@@ -18,28 +21,38 @@ router = APIRouter()
 async def get_session_history(
     session_id: str = Query(
         ...,
-        description="The structural storage session identifier tracking conversation threads.",
+        description="The chat session identifier.",
+    ),
+    document_id: UUID = Query(
+        ...,
+        description="The currently selected document identifier.",
     ),
     history_service: HistoryService = Depends(
-        get_history_service
+        get_history_service,
     ),
 ):
     """
-    Retrieves full conversation logs
-    along with their source chunks.
+    Retrieve conversation history for the selected document.
+
+    Returns only the conversations whose citations belong to the
+    specified document.
     """
 
     history_records = await history_service.fetch_session_history(
-        session_id
+        session_id=session_id,
+        document_id=str(document_id),
     )
 
     response = {
         "session_id": session_id,
+        "document_id": str(document_id),
         "history": history_records,
     }
 
-    print("\n================ HISTORY API RESPONSE ================\n")
+    print("\n" + "=" * 80)
+    print("HISTORY API RESPONSE")
+    print("=" * 80)
     pprint(response, sort_dicts=False)
-    print("\n======================================================\n")
+    print("=" * 80 + "\n")
 
     return response

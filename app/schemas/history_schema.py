@@ -7,6 +7,9 @@ from .query_schema import ChunkCitation
 
 
 class HistorySessionRecord(BaseResponseSchema):
+    """
+    Single conversation record within a chat session.
+    """
 
     id: UUID
 
@@ -24,7 +27,12 @@ class HistorySessionRecord(BaseResponseSchema):
 
 
 class HistoryListResponse(BaseResponseSchema):
+    """
+    History response for a selected document.
+    """
 
     session_id: str
+
+    document_id: UUID
 
     history: List[HistorySessionRecord]

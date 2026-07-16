@@ -74,30 +74,37 @@ class HistoryService:
     async def fetch_session_history(
         self,
         session_id: str,
+        document_id: str,
     ) -> list[dict]:
         """
-        Retrieve complete conversation history for a session.
+        Retrieve conversation history for the selected document.
 
         Args:
             session_id:
                 Chat session identifier.
 
+            document_id:
+                Selected document identifier.
+
         Returns:
-            List of conversations.
+            List of conversations belonging to the selected document.
         """
 
         logger.info(
-            "Fetching conversation history | session=%s",
+            "Fetching conversation history | session=%s | document=%s",
             session_id,
+            document_id,
         )
 
         history = await self.history_repo.get_session_history(
             session_id=session_id,
+            document_id=document_id,
         )
 
         logger.info(
-            "Retrieved %d conversation(s).",
+            "Retrieved %d conversation(s) for document=%s",
             len(history),
+            document_id,
         )
 
         return history

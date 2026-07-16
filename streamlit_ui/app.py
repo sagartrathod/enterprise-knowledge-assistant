@@ -171,7 +171,6 @@ if not selected_doc_id:
     )
 
     st.stop()
-
 # ==========================================================
 # Current Document
 # ==========================================================
@@ -181,11 +180,15 @@ st.success(
 )
 
 # ==========================================================
-# Load Chat History
+# Load History When Document Changes
 # ==========================================================
 
-if "messages" not in st.session_state:
+if (
+    "loaded_document_id" not in st.session_state
+    or st.session_state.loaded_document_id != selected_doc_id
+):
 
+    st.session_state.loaded_document_id = selected_doc_id
     st.session_state.messages = []
 
     try:
@@ -194,7 +197,9 @@ if "messages" not in st.session_state:
             f"{API_BASE_URL}/history",
             params={
                 "session_id": SESSION_ID,
+                "document_id": selected_doc_id,
             },
+            timeout=30,
         )
 
         if response.status_code == 200:
@@ -204,7 +209,10 @@ if "messages" not in st.session_state:
                 [],
             )
 
-            for item in reversed(history):
+            # oldest -> newest
+            history.reverse()
+
+            for item in history:
 
                 st.session_state.messages.append(
                     {
@@ -224,10 +232,25 @@ if "messages" not in st.session_state:
                     }
                 )
 
-    except Exception:
-        pass
+        else:
+
+            st.error(
+                f"History API Error ({response.status_code})"
+            )
+
+            try:
+                st.json(response.json())
+            except Exception:
+                st.text(response.text)
+
+    except Exception as ex:
+
+        st.error(
+            f"Unable to load history:\n{ex}"
+        )
+
 # ==========================================================
-# Display Existing Messages
+# Display Chat History
 # ==========================================================
 
 for message in st.session_state.messages:
@@ -252,51 +275,83 @@ for message in st.session_state.messages:
                 ):
 
                     similarity = float(
-                        cite.get("similarity", 0.0)
+                        cite.get(
+                            "similarity",
+                            0.0,
+                        )
                     )
 
-                    # Convert to percentage if stored as decimal
                     similarity_percent = (
                         similarity * 100
                         if similarity <= 1
                         else similarity
                     )
 
-                    st.markdown(f"### 📄 Source {idx}")
+                    with st.container():
 
-                    col1, col2 = st.columns([3, 1])
-
-                    with col1:
                         st.markdown(
-                            f"""
-**File:** `{cite.get("pdf_name")}`
-
-**Page:** {cite.get("page_number")}
-
-**Chunk:** {cite.get("chunk_number")}
-
-**Lines:** {cite.get("line_start")} - {cite.get("line_end")}
-"""
+                            f"### 📄 Source {idx}"
                         )
 
-                    with col2:
-                        st.metric(
-                            "Similarity",
-                            f"{similarity_percent:.2f}%"
+                        st.markdown(
+                            f"**Similarity:** **{similarity_percent:.2f}%**"
                         )
 
-                    st.progress(
-                        min(similarity_percent / 100, 1.0)
-                    )
+                        st.progress(
+                            min(
+                                similarity_percent / 100,
+                                1.0,
+                            )
+                        )
 
-                    st.code(
-                        cite.get("chunk_text", ""),
-                        language="text",
-                    )
+                        st.markdown(
+                                    f"""
+                        <div style="
+                        background:#f8f9fa;
+                        border-left:5px solid #4CAF50;
+                        padding:16px;
+                        border-radius:8px;
+                        font-size:15px;
+                        line-height:1.7;
+                        color:#262730;
+                        ">
+                        {cite.get("chunk_text", "")}
+                        </div>
+                        """,
+                                    unsafe_allow_html=True,
+                                )
 
-                    st.divider()
+                        c1, c2, c3 = st.columns(3)
 
-                    
+                        c1.metric(
+                            "Page",
+                            cite.get(
+                                "page_number",
+                                "-",
+                            ),
+                        )
+
+                        c2.metric(
+                            "Chunk",
+                            cite.get(
+                                "chunk_number",
+                                "-",
+                            ),
+                        )
+
+                        c3.metric(
+                            "Lines",
+                            f"{cite.get('line_start','-')} - {cite.get('line_end','-')}",
+                        )
+
+                        st.caption(
+                            f"📄 {cite.get('pdf_name','')}"
+                        )
+
+                        st.divider()
+
+                        
+                                            
 # ==========================================================
 # Chat Input
 # ==========================================================
@@ -352,134 +407,84 @@ if prompt := st.chat_input(
 
                     data = response.json()
 
-                    answer = data.get(
-                        "answer",
-                        "No answer returned.",
-                    )
+                    answer = data.get("answer", "No answer returned.")
 
-                    citations = data.get(
-                        "citations",
-                        [],
-                    )
-
-                    total_chunks = data.get(
-                        "total_chunks_used",
-                        0,
-                    )
-
-                    # -----------------------------
-                    # Answer
-                    # -----------------------------
-
-                    st.markdown("## 🤖 Answer")
+                    citations = data.get("citations", [])
 
                     st.write(answer)
 
-                    # -----------------------------
-                    # Retrieval Statistics
-                    # -----------------------------
-
-                    st.markdown("---")
-
-                    st.subheader("📊 Retrieval Statistics")
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-
-                        st.metric(
-                            label="Chunks Used",
-                            value=total_chunks,
-                        )
-
-                    with col2:
-
-                        if citations:
-
-                            average_similarity = (
-                                sum(
-                                    c.get(
-                                        "similarity",
-                                        0,
-                                    )
-                                    for c in citations
-                                )
-                                / len(citations)
-                            )
-
-                            st.metric(
-                                "Average Similarity",
-                                f"{average_similarity:.2%}",
-                            )
-
-                        else:
-
-                            st.metric(
-                                "Average Similarity",
-                                "0%",
-                            )
-
-                    # -----------------------------
-                    # Sources
-                    # -----------------------------
-
                     if citations:
 
-                        st.markdown("---")
-
-                        st.subheader(
-                            "📚 Supporting Sources"
-                        )
-
-                        for index, cite in enumerate(
-                            citations,
-                            start=1,
+                        with st.expander(
+                            f"📚 Retrieved Sources ({len(citations)})",
+                            expanded=False,
                         ):
 
-                            similarity = cite.get(
-                                "similarity",
-                                0,
-                            )
+                            for idx, cite in enumerate(citations, start=1):
 
-                            with st.expander(
-                                f"📄 Source {index} • {cite['pdf_name']} • {similarity:.2%}"
-                            ):
+                                similarity = float(
+                                    cite.get("similarity", 0.0)
+                                )
 
-                                c1, c2, c3 = st.columns(3)
+                                similarity_percent = (
+                                    similarity * 100
+                                    if similarity <= 1
+                                    else similarity
+                                )
 
-                                c1.metric(
+                                st.markdown(
+                                    f"### 📄 Source {idx}"
+                                )
+
+                                st.markdown(
+                                    f"**Similarity:** **{similarity_percent:.2f}%**"
+                                )
+
+                                st.progress(
+                                    min(similarity_percent / 100, 1.0)
+                                )
+
+                                st.markdown(
+                                    f"""
+                        <div style="
+                        background:#f8f9fa;
+                        border-left:5px solid #4CAF50;
+                        padding:16px;
+                        border-radius:8px;
+                        font-size:15px;
+                        line-height:1.7;
+                        color:#262730;
+                        ">
+                        {cite.get("chunk_text", "")}
+                        </div>
+                        """,
+                                    unsafe_allow_html=True,
+                                )
+
+                                st.markdown("")
+
+                                col1, col2, col3 = st.columns(3)
+
+                                col1.metric(
                                     "Page",
                                     cite["page_number"],
                                 )
 
-                                c2.metric(
+                                col2.metric(
                                     "Chunk",
                                     cite["chunk_number"],
                                 )
 
-                                c3.metric(
-                                    "Similarity",
-                                    f"{similarity:.2%}",
+                                col3.metric(
+                                    "Lines",
+                                    f"{cite['line_start']} - {cite['line_end']}",
                                 )
 
                                 st.caption(
-                                    f"Lines {cite['line_start']} - {cite['line_end']}"
+                                    f"📄 {cite['pdf_name']}"
                                 )
 
-                                st.code(
-                                    cite["chunk_text"],
-                                    language="text",
-                                )
-
-                    else:
-
-                        st.info(
-                            "No supporting document chunks were used."
-                        )
-
-                    # -----------------------------
-                    # Save to chat history
-                    # -----------------------------
+                                st.divider()
 
                     st.session_state.messages.append(
                         {

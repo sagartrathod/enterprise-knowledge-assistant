@@ -1,4 +1,12 @@
-# Handles transactional storage of conversations along with their cited context references
+# app/sql/history_sql.py
+
+"""
+SQL queries for conversation history and citation storage.
+"""
+
+# ==========================================================
+# Insert Conversation
+# ==========================================================
 
 INSERT_HISTORY_LOG = """
 INSERT INTO conversation_history
@@ -18,6 +26,10 @@ VALUES
 RETURNING id;
 """
 
+
+# ==========================================================
+# Insert Citation
+# ==========================================================
 
 INSERT_HISTORY_CITATION = """
 INSERT INTO conversation_history_citations
@@ -47,6 +59,10 @@ VALUES
 """
 
 
+# ==========================================================
+# Get Conversation History for Selected Document
+# ==========================================================
+
 GET_HISTORY_WITH_CITATIONS = """
 SELECT
 
@@ -69,16 +85,14 @@ SELECT
                 'page_number', chc.page_number,
                 'line_start', chc.line_start,
                 'line_end', chc.line_end,
-                'similarity', ROUND(COALESCE(chc.similarity,0)::numeric,4),
+                'similarity', ROUND(COALESCE(chc.similarity, 0)::numeric, 4),
                 'chunk_text', chc.chunk_text
 
             )
 
             ORDER BY chc.chunk_number
 
-        )
-
-        FILTER (WHERE chc.id IS NOT NULL),
+        ),
 
         '[]'::jsonb
 
@@ -86,10 +100,12 @@ SELECT
 
 FROM conversation_history ch
 
-LEFT JOIN conversation_history_citations chc
-ON ch.id = chc.history_id
+INNER JOIN conversation_history_citations chc
+    ON ch.id = chc.history_id
 
-WHERE ch.session_id = $1
+WHERE
+    ch.session_id = $1
+    AND chc.document_id = $2
 
 GROUP BY
     ch.id,
