@@ -24,6 +24,7 @@ from app.services import (
     HybridSearchService,
     RerankerService,
     RAGService,
+    GuardrailService,
 )
 
 
@@ -90,6 +91,8 @@ def get_llm_service(
     return LLMService(
         prompt_service=prompt_service,
     )
+def get_guardrail_service() -> GuardrailService:
+    return GuardrailService()
 
 
 # ==========================================================
@@ -199,6 +202,9 @@ def get_rag_service(
     history_service: HistoryService = Depends(
         get_history_service
     ),
+    guardrail_service: GuardrailService = Depends(
+        get_guardrail_service
+    ),
 ) -> RAGService:
 
     return RAGService(
@@ -207,4 +213,5 @@ def get_rag_service(
         context_service=context_service,
         llm_service=llm_service,
         history_service=history_service,
+        guardrail_service=guardrail_service,
     )

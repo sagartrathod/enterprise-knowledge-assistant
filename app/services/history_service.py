@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.core.logger import logger
+from app.exceptions.custom_exceptions import DatabaseException
 from app.repositories.history_repository import HistoryRepository
 
 
@@ -14,7 +15,8 @@ class HistoryService:
     ----------------
     - Save conversations
     - Retrieve session history
-    - Encapsulate history repository operations
+    - Business validations
+    - Repository orchestration
     """
 
     def __init__(
@@ -24,6 +26,10 @@ class HistoryService:
 
         self.history_repo = history_repo
 
+    # ==========================================================
+    # Save Conversation
+    # ==========================================================
+
     async def save_conversation(
         self,
         session_id: str,
@@ -32,44 +38,48 @@ class HistoryService:
         citations: list[dict],
     ) -> str:
         """
-        Persist a conversation and its citations.
-
-        Args:
-            session_id:
-                Chat session identifier.
-
-            question:
-                User question.
-
-            answer:
-                LLM generated answer.
-
-            citations:
-                Retrieved chunks used for answering.
-
-        Returns:
-            History record ID.
+        Save conversation with citations.
         """
 
+        logger.info("=" * 100)
+        logger.info("SAVE CONVERSATION")
+        logger.info("=" * 100)
+
         logger.info(
-            "Saving conversation | session=%s | citations=%d",
+            "Session=%s | Citations=%d",
             session_id,
             len(citations),
         )
 
-        history_id = await self.history_repo.save_conversation(
-            session_id=session_id,
-            question=question,
-            answer=answer,
-            citations=citations,
-        )
+        try:
 
-        logger.info(
-            "Conversation saved successfully | history_id=%s",
-            history_id,
-        )
+            history_id = await self.history_repo.save_conversation(
+                session_id=session_id,
+                question=question,
+                answer=answer,
+                citations=citations,
+            )
 
-        return history_id
+            logger.info(
+                "Conversation saved successfully | History=%s",
+                history_id,
+            )
+
+            return history_id
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to save conversation."
+            )
+
+            raise DatabaseException(
+                "Failed to save conversation."
+            ) from exc
+
+    # ==========================================================
+    # Fetch Session History
+    # ==========================================================
 
     async def fetch_session_history(
         self,
@@ -77,34 +87,39 @@ class HistoryService:
         document_id: str,
     ) -> list[dict]:
         """
-        Retrieve conversation history for the selected document.
-
-        Args:
-            session_id:
-                Chat session identifier.
-
-            document_id:
-                Selected document identifier.
-
-        Returns:
-            List of conversations belonging to the selected document.
+        Retrieve conversation history for a document.
         """
 
+        logger.info("=" * 100)
+        logger.info("FETCH SESSION HISTORY")
+        logger.info("=" * 100)
+
         logger.info(
-            "Fetching conversation history | session=%s | document=%s",
+            "Session=%s | Document=%s",
             session_id,
             document_id,
         )
 
-        history = await self.history_repo.get_session_history(
-            session_id=session_id,
-            document_id=document_id,
-        )
+        try:
 
-        logger.info(
-            "Retrieved %d conversation(s) for document=%s",
-            len(history),
-            document_id,
-        )
+            history = await self.history_repo.get_session_history(
+                session_id=session_id,
+                document_id=document_id,
+            )
 
-        return history
+            logger.info(
+                "Retrieved %d conversation(s).",
+                len(history),
+            )
+
+            return history
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to fetch session history."
+            )
+
+            raise DatabaseException(
+                "Unable to retrieve conversation history."
+            ) from exc

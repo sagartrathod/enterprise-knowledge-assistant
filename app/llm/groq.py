@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from groq import AsyncGroq
-from groq import APIError
-from groq import APITimeoutError
-from groq import RateLimitError
+import time
+
+from groq import (
+    APIError,
+    APITimeoutError,
+    AsyncGroq,
+    AuthenticationError,
+    RateLimitError,
+)
 
 from app.core.config import settings
+from app.core.constants import (
+    DEFAULT_NO_ANSWER,
+    GROQ_MODEL,
+    LLM_FREQUENCY_PENALTY,
+    LLM_MAX_TOKENS,
+    LLM_PRESENCE_PENALTY,
+    LLM_TEMPERATURE,
+    LLM_TOP_P,
+)
 from app.core.logger import logger
 
 
@@ -15,20 +29,17 @@ class GroqClient:
 
     Responsibilities
     ----------------
-    - Connect to Groq.
-    - Send chat completion requests.
-    - Return generated responses.
-    - Handle API errors.
+    - Connect to Groq
+    - Execute chat completion requests
+    - Return generated responses
+    - Handle API failures
+    - Log request statistics
 
-    This class MUST NOT:
-    - Build prompts.
-    - Format context.
-    - Know anything about RAG.
+    This class MUST NOT know anything about:
+    - RAG
+    - Context retrieval
+    - Prompt engineering
     """
-
-    DEFAULT_FALLBACK = (
-        "I cannot find the answer based on the provided document chunks."
-    )
 
     def __init__(self) -> None:
 
@@ -36,10 +47,11 @@ class GroqClient:
             api_key=settings.GROQ_API_KEY,
         )
 
-        self.model = getattr(
-            settings,
-            "GROQ_MODEL",
-            "llama-3.3-70b-versatile",
+        self.model = GROQ_MODEL
+
+        logger.info(
+            "GroqClient initialized | Model=%s",
+            self.model,
         )
 
     async def generate_answer(
@@ -49,30 +61,62 @@ class GroqClient:
         user_prompt: str,
     ) -> str:
         """
-        Generate an answer using Groq.
-
-        Parameters
-        ----------
-        system_prompt:
-            System instructions.
-
-        user_prompt:
-            Final user prompt.
-
-        Returns
-        -------
-        Generated answer.
+        Generate answer using Groq.
         """
 
+        if not system_prompt.strip():
+
+            logger.warning(
+                "System prompt is empty."
+            )
+
+            return DEFAULT_NO_ANSWER
+
+        if not user_prompt.strip():
+
+            logger.warning(
+                "User prompt is empty."
+            )
+
+            return DEFAULT_NO_ANSWER
+
+        logger.info("=" * 100)
+        logger.info("GROQ REQUEST")
+        logger.info("=" * 100)
+
+        logger.info("Model : %s", self.model)
+
         logger.info(
-            "Calling Groq model=%s",
-            self.model,
+            "Temperature : %.2f",
+            LLM_TEMPERATURE,
         )
 
-        logger.debug(
-            "User prompt size=%d characters",
+        logger.info(
+            "Top P : %.2f",
+            LLM_TOP_P,
+        )
+
+        logger.info(
+            "Max Tokens : %d",
+            LLM_MAX_TOKENS,
+        )
+
+        logger.info(
+            "System Prompt Length : %d",
+            len(system_prompt),
+        )
+
+        logger.info(
+            "User Prompt Length : %d",
             len(user_prompt),
         )
+
+        logger.info(
+            "Total Prompt Length : %d",
+            len(system_prompt) + len(user_prompt),
+        )
+
+        start = time.perf_counter()
 
         try:
 
@@ -81,31 +125,25 @@ class GroqClient:
                 model=self.model,
 
                 messages=[
-
                     {
                         "role": "system",
                         "content": system_prompt,
                     },
-
                     {
                         "role": "user",
                         "content": user_prompt,
                     },
-
                 ],
 
-                temperature=0.0,
-
-                top_p=1.0,
-
-                max_tokens=1024,
-
-                frequency_penalty=0,
-
-                presence_penalty=0,
-
+                temperature=LLM_TEMPERATURE,
+                top_p=LLM_TOP_P,
+                max_tokens=LLM_MAX_TOKENS,
+                frequency_penalty=LLM_FREQUENCY_PENALTY,
+                presence_penalty=LLM_PRESENCE_PENALTY,
                 stream=False,
             )
+
+            elapsed = time.perf_counter() - start
 
             if (
                 not response.choices
@@ -116,7 +154,7 @@ class GroqClient:
                     "Groq returned an empty response."
                 )
 
-                return self.DEFAULT_FALLBACK
+                return DEFAULT_NO_ANSWER
 
             answer = (
                 response.choices[0]
@@ -126,10 +164,30 @@ class GroqClient:
             )
 
             logger.info(
-                "Groq response generated successfully."
+                "Groq completed successfully."
             )
 
+            logger.info(
+                "Response Time : %.2f sec",
+                elapsed,
+            )
+
+            logger.info(
+                "Answer Length : %d characters",
+                len(answer),
+            )
+
+            logger.info("=" * 100)
+
             return answer
+
+        except AuthenticationError:
+
+            logger.exception(
+                "Groq authentication failed."
+            )
+
+            raise
 
         except RateLimitError:
 

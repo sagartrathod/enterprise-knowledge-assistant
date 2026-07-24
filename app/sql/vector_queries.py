@@ -12,9 +12,13 @@ SELECT
 
     dc.document_id,
 
+    d.pdf_name,
+
     dc.chunk_number,
 
-    dc.page_number,
+    dc.page_start,
+
+    dc.page_end,
 
     dc.line_start,
 
@@ -22,13 +26,25 @@ SELECT
 
     dc.chunk_text,
 
-    d.pdf_name,
-
     dc.embedding <=> $1::vector AS distance,
 
-    (
-        1 - (dc.embedding <=> $1::vector)
-    ) AS similarity
+    ROUND(
+        (
+            1.0 - (dc.embedding <=> $1::vector)
+        )::numeric,
+        6
+    ) AS similarity,
+
+    ts_rank_cd(
+        to_tsvector(
+            'english',
+            dc.chunk_text
+        ),
+        plainto_tsquery(
+            'english',
+            COALESCE($4, '')
+        )
+    ) AS keyword_score
 
 FROM document_chunks dc
 
@@ -42,7 +58,12 @@ WHERE
 )
 
 ORDER BY
-distance ASC
+
+    similarity DESC,
+
+    page_start ASC,
+
+    chunk_number ASC
 
 LIMIT $2;
 """

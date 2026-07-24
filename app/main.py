@@ -1,75 +1,221 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-
+from fastapi.routing import APIRoute
+from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import db_manager
 from app.core.logger import logger
-from app.api.v1.router import api_router
+from app.exceptions.handlers import register_exception_handlers
+from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.request_context import RequestContextMiddleware
+
+
+# ==============================================================================
+# Application Lifespan
+# ==============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Manages the application lifecycle events, ensuring the asyncpg 
-    database connection pool starts and terminates cleanly.
+    Application startup and shutdown lifecycle.
     """
-    # 1. Startup phase
+
+    logger.info("=" * 100)
+    logger.info("APPLICATION STARTUP")
+    logger.info("=" * 100)
+
     try:
+
         await db_manager.connect_to_db()
-        logger.info(f"Successfully booted {settings.APP_NAME} in [{settings.APP_ENV}] mode.")
-    except Exception as e:
-        logger.critical(f"Lifespan startup failure. Could not connect to database: {str(e)}")
-        raise e
-        
+
+        logger.info("Application   : %s", settings.APP_NAME)
+        logger.info("Version       : %s", "1.0.0")
+        logger.info("Environment   : %s", settings.APP_ENV)
+        logger.info("Debug Mode    : %s", settings.DEBUG)
+
+        logger.info("Database connected successfully.")
+
+        logger.info("=" * 100)
+        logger.info("REGISTERED ROUTES")
+        logger.info("=" * 100)
+
+        for route in app.routes:
+
+            if isinstance(route, APIRoute):
+
+                methods = ", ".join(
+                    sorted(route.methods)
+                )
+
+                logger.info(
+                    "%-15s %s",
+                    methods,
+                    route.path,
+                )
+
+        logger.info("=" * 100)
+        logger.info("APPLICATION STARTED SUCCESSFULLY")
+        logger.info("=" * 100)
+
+    except Exception:
+
+        logger.exception("Application startup failed.")
+
+        raise
+
     yield
-    
-    # 2. Shutdown phase
-    logger.info("Initiating application lifespan shutdown procedures...")
-    await db_manager.close_db_connection()
-    logger.info("Application lifespan shutdown completed safely.")
+
+    logger.info("=" * 100)
+    logger.info("APPLICATION SHUTDOWN")
+    logger.info("=" * 100)
+
+    try:
+
+        await db_manager.close_db_connection()
+
+        logger.info(
+            "Database connection pool closed successfully."
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Failed while closing database connection."
+        )
+
+    logger.info("Application shutdown completed.")
+    logger.info("=" * 100)
 
 
-# Initialize the principal FastAPI application context
+# ==============================================================================
+# FastAPI Application
+# ==============================================================================
+
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Enterprise Retrieval-Augmented Generation (RAG) Engine with raw SQL asyncpg & pgvector backend.",
+    description=(
+        "Enterprise Retrieval-Augmented Generation (RAG) "
+        "using FastAPI, PostgreSQL, pgvector, "
+        "Hybrid Search, CrossEncoder Reranking and Groq."
+    ),
     version="1.0.0",
     debug=settings.DEBUG,
-    lifespan=lifespan
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
-# Configure Cross-Origin Resource Sharing (CORS) Middleware
+# ==============================================================================
+# Register Global Exception Handlers
+# ==============================================================================
+
+register_exception_handlers(app)
+
+# ==============================================================================
+# Middleware
+# ==============================================================================
+
+# Request Context Middleware
+# (Request ID, Session ID, Start Time)
+app.add_middleware(
+    RequestContextMiddleware,
+)
+
+# Request / Response Logging
+app.add_middleware(
+    LoggingMiddleware,
+)
+
+# Cross Origin Resource Sharing
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust this configuration parameter to specific domains in production
+    allow_origins=["*"],      # Change in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Attach the global unified API router layout under /api prefix[cite: 1]
-app.include_router(api_router, prefix="/api")
+# ==============================================================================
+# API Routes
+# ==============================================================================
 
+app.include_router(
+    api_router,
+    prefix="/api",
+)
 
-@app.get("/health", status_code=status.HTTP_200_OK, tags=["System Health"])
-async def health_check():
-    """
-    Simple verification probe endpoint used to monitor deployment status.
-    """
-    # Attempt to fetch the active pool to verify database connectivity status
-    is_database_alive = False
-    try:
-        pool = db_manager.get_pool()
-        async with pool.acquire() as conn:
-            # Execute a fast dummy database transaction statement
-            await conn.execute("SELECT 1;")
-            is_database_alive = True
-    except Exception as e:
-        logger.error(f"Health check probe database connection failure: {str(e)}")
+# ==============================================================================
+# Root Endpoint
+# ==============================================================================
+
+@app.get(
+    "/",
+    tags=["System"],
+)
+async def root():
+
+    logger.info("Root endpoint accessed.")
 
     return {
-        "status": "healthy" if is_database_alive else "unhealthy",
-        "app_name": settings.APP_NAME,
+        "application": settings.APP_NAME,
+        "version": "1.0.0",
         "environment": settings.APP_ENV,
-        "database_connected": is_database_alive
+        "status": "running",
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "health": "/health",
+    }
+
+
+# ==============================================================================
+# Health Check
+# ==============================================================================
+
+@app.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    tags=["System"],
+)
+async def health_check():
+
+    logger.info("Health check requested.")
+
+    database_connected = False
+
+    try:
+
+        pool = db_manager.get_pool()
+
+        async with pool.acquire() as conn:
+
+            await conn.fetchval("SELECT 1")
+
+        database_connected = True
+
+    except Exception:
+
+        logger.exception(
+            "Database health check failed."
+        )
+
+    logger.info(
+        "Health Status | Database=%s",
+        "Connected" if database_connected else "Disconnected",
+    )
+
+    return {
+        "status": (
+            "healthy"
+            if database_connected
+            else "unhealthy"
+        ),
+        "application": settings.APP_NAME,
+        "version": "1.0.0",
+        "environment": settings.APP_ENV,
+        "database_connected": database_connected,
     }

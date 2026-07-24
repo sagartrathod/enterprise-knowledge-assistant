@@ -1,29 +1,34 @@
-# app/services/upload_service.py
+from __future__ import annotations
 
 from fastapi import UploadFile
 
-from app.repositories.upload_repository import UploadRepository
+from app.core.constants import (
+    CHUNK_MAX_WORDS,
+    CHUNK_OVERLAP_WORDS,
+    MIN_CHUNK_WORDS,
+)
+from app.core.logger import logger
+from app.exceptions.custom_exceptions import (
+    BadRequestException,
+    DatabaseException,
+)
+from typing import List
 from app.repositories.chunk_repository import ChunkRepository
+from app.repositories.upload_repository import UploadRepository
 from app.services.embedding_service import EmbeddingService
 
+from app.utils.chunker import create_overlapping_chunks
 from app.utils.file_utils import save_temporary_file
 from app.utils.pdf_parser import parse_pdf_layout
-from app.utils.chunker import create_overlapping_chunks
-
-from app.core.constants import CHUNK_MAX_WORDS, CHUNK_OVERLAP_WORDS
 
 
 def clean_text(text: str) -> str:
-    """
-    Removes invalid characters before PostgreSQL insertion.
-    """
 
     if not text:
         return ""
 
     return (
-        text
-        .replace("\x00", "")
+        text.replace("\x00", "")
         .replace("\ufeff", "")
         .encode("utf-8", errors="ignore")
         .decode("utf-8")
@@ -37,99 +42,225 @@ class UploadService:
         self,
         upload_repo: UploadRepository,
         chunk_repo: ChunkRepository,
-        embedding_service: EmbeddingService
+        embedding_service: EmbeddingService,
     ):
+
         self.upload_repo = upload_repo
         self.chunk_repo = chunk_repo
         self.embedding_service = embedding_service
 
+    async def process_pdf_upload(
+        self,
+        file: UploadFile,
+    ) -> dict:
 
-    async def process_pdf_upload(self, file: UploadFile) -> dict:
-        """
-        Upload PDF -> Store locally -> Parse -> Chunk ->
-        Generate embeddings -> Save metadata.
-        """
+        logger.info("=" * 100)
+        logger.info("UPLOAD SERVICE")
+        logger.info("=" * 100)
 
-        # Save permanently inside app/upload
-        pdf_path = save_temporary_file(file)
-
-
-        # 1. Create document record
-        doc_record = await self.upload_repo.create_document(
-            pdf_name=file.filename
+        logger.info(
+            "Processing PDF : %s",
+            file.filename,
         )
 
-        if not doc_record:
-            raise Exception(
-                "Failed to create document record"
+        try:
+
+            # --------------------------------------------------
+            # Validation
+            # --------------------------------------------------
+
+            if not file.filename:
+
+                raise BadRequestException(
+                    "Filename cannot be empty."
+                )
+
+            if not file.filename.lower().endswith(".pdf"):
+
+                raise BadRequestException(
+                    "Only PDF files are supported."
+                )
+
+            # --------------------------------------------------
+            # Save PDF
+            # --------------------------------------------------
+
+            pdf_path = save_temporary_file(file)
+
+            logger.info(
+                "Temporary file saved."
             )
 
+            # --------------------------------------------------
+            # Create Document
+            # --------------------------------------------------
 
-        document_id = doc_record["document_id"]
-
-
-        # 2. Parse PDF
-        parsed_lines = parse_pdf_layout(
-            pdf_path
-        )
-
-        if not parsed_lines:
-            raise Exception(
-                "No text extracted from PDF"
+            doc_record = await self.upload_repo.create_document(
+                pdf_name=file.filename,
             )
 
+            if not doc_record:
 
-        # 3. Generate chunks
-        chunks = create_overlapping_chunks(
-            parsed_lines,
-            max_words=CHUNK_MAX_WORDS,
-            overlap_words=CHUNK_OVERLAP_WORDS
-        )
+                raise DatabaseException(
+                    "Failed to create document."
+                )
 
+            document_id = doc_record["document_id"]
 
-        processed_count = 0
-
-
-        # 4. Generate embeddings and store
-        for chunk in chunks:
-
-            chunk_text = clean_text(
-                chunk["chunk_text"]
+            logger.info(
+                "Document created : %s",
+                document_id,
             )
 
-            chunk_text = chunk_text.replace(
-                "\x00",
-                ""
-            ).strip()
+            # --------------------------------------------------
+            # Parse PDF
+            # --------------------------------------------------
 
-
-            if not chunk_text:
-                continue
-
-
-            embedding = await self.embedding_service.get_embedding(
-                chunk_text
+            parsed_lines = parse_pdf_layout(
+                pdf_path,
             )
 
+            if not parsed_lines:
 
-            await self.chunk_repo.save_chunk_metadata(
-                document_id=document_id,
-                chunk_number=chunk["chunk_number"],
-                page_number=chunk["page_number"],
-                line_start=chunk["line_start"],
-                line_end=chunk["line_end"],
-                chunk_text=chunk_text,
-                embedding=embedding
+                raise BadRequestException(
+                    "No readable text found in PDF."
+                )
+
+            logger.info(
+                "Extracted %d lines.",
+                len(parsed_lines),
             )
 
+            # --------------------------------------------------
+            # Chunking
+            # --------------------------------------------------
 
-            processed_count += 1
+            chunks = create_overlapping_chunks(
+                parsed_lines=parsed_lines,
+                max_words=CHUNK_MAX_WORDS,
+                overlap_words=CHUNK_OVERLAP_WORDS,
+            )
+
+            logger.info(
+                "Generated %d chunks.",
+                len(chunks),
+            )
+
+            # --------------------------------------------------
+            # Embedding + Storage
+            # --------------------------------------------------
+
+            processed = 0
+
+            for chunk in chunks:
+
+                chunk_text = clean_text(
+                    chunk["chunk_text"],
+                )
+
+                if not chunk_text:
+                    continue
+
+                if len(chunk_text.split()) < MIN_CHUNK_WORDS:
+                    continue
+
+                embedding = (
+                    await self.embedding_service.get_embedding(
+                        chunk_text,
+                    )
+                )
+
+                await self.chunk_repo.save_chunk_metadata(
+
+                    document_id=document_id,
+
+                    chunk_number=chunk["chunk_number"],
+
+                    page_start=chunk["page_start"],
+
+                    page_end=chunk["page_end"],
+
+                    line_start=chunk["line_start"],
+
+                    line_end=chunk["line_end"],
+
+                    chunk_text=chunk_text,
+
+                    embedding=embedding,
+                )
+
+                processed += 1
+
+            logger.info(
+                "Stored %d chunks.",
+                processed,
+            )
+
+            doc_record["total_chunks_processed"] = processed
+
+            logger.info(
+                "PDF upload completed successfully."
+            )
+
+            return doc_record
+
+        except (
+            BadRequestException,
+            DatabaseException,
+        ):
+            raise
+
+        except Exception as exc:
+
+            logger.exception(
+                "PDF upload failed."
+            )
+
+            raise DatabaseException(
+                "Failed to process uploaded PDF."
+            ) from exc
 
 
-        doc_record["total_chunks_processed"] = processed_count
+    
 
-        # Store local path in response
-        doc_record["file_path"] = pdf_path
+    async def process_multiple_pdf_upload(
+        self,
+        files: List[UploadFile],
+    ) -> dict:
 
+        logger.info("Uploading %d PDFs", len(files))
 
-        return doc_record
+        uploaded = []
+        failed = []
+
+        for file in files:
+
+            try:
+
+                result = await self.process_pdf_upload(
+                    file=file,
+                )
+
+                uploaded.append(result)
+
+            except Exception as exc:
+
+                logger.exception(
+                    "Failed uploading %s",
+                    file.filename,
+                )
+
+                failed.append(
+                    {
+                        "filename": file.filename,
+                        "error": str(exc),
+                    }
+                )
+
+        return {
+            "total_files": len(files),
+            "uploaded": len(uploaded),
+            "failed": len(failed),
+            "documents": uploaded,
+            "errors": failed,
+        }

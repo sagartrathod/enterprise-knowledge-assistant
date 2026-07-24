@@ -1,26 +1,68 @@
-import sys
+from __future__ import annotations
+
 import logging
-from app.core.config import settings
+import os
+from logging.handlers import RotatingFileHandler
 
-def setup_logger(name: str = "app") -> logging.Logger:
-    """Configures structured terminal stream log output formatters."""
-    logger = logging.getLogger(name)
-    
-    # Avoid duplicate handlers if initialized multiple times
-    if logger.hasHandlers():
-        return logger
+LOG_DIR = "logs"
 
-    logger.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
+os.makedirs(LOG_DIR, exist_ok=True)
 
-    formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - [%(name)s] - [%(filename)s:%(lineno)d] - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
+LOG_FORMAT = (
+    "%(asctime)s | "
+    "%(levelname)-8s | "
+    "%(filename)s:%(lineno)d | "
+    "%(message)s"
+)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
-    return logger
+formatter = logging.Formatter(LOG_FORMAT)
 
-logger = setup_logger()
+logger = logging.getLogger("enterprise-rag")
+
+logger.setLevel(logging.INFO)
+
+logger.handlers.clear()
+
+# ==========================================================
+# Console
+# ==========================================================
+
+console_handler = logging.StreamHandler()
+
+console_handler.setFormatter(formatter)
+
+logger.addHandler(console_handler)
+
+# ==========================================================
+# Application Log
+# ==========================================================
+
+app_handler = RotatingFileHandler(
+    f"{LOG_DIR}/app.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=10,
+    encoding="utf-8",
+)
+
+app_handler.setFormatter(formatter)
+
+logger.addHandler(app_handler)
+
+# ==========================================================
+# Error Log
+# ==========================================================
+
+error_handler = RotatingFileHandler(
+    f"{LOG_DIR}/error.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=10,
+    encoding="utf-8",
+)
+
+error_handler.setLevel(logging.ERROR)
+
+error_handler.setFormatter(formatter)
+
+logger.addHandler(error_handler)
+
+logger.propagate = False

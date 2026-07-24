@@ -274,17 +274,22 @@ for message in st.session_state.messages:
                     start=1,
                 ):
 
+                    chunk_confidence = cite.get("chunk_confidence", 0.0)
+
                     similarity = float(
-                        cite.get(
-                            "similarity",
-                            0.0,
-                        )
+                        cite.get("similarity", 0.0)
                     )
 
-                    similarity_percent = (
-                        similarity * 100
-                        if similarity <= 1
-                        else similarity
+                    rerank = float(
+                        cite.get("rerank_score", 0.0)
+                    )
+
+                    keyword = float(
+                        cite.get("keyword_score", 0.0)
+                    )
+
+                    rrf = float(
+                        cite.get("rrf_score", 0.0)
                     )
 
                     with st.container():
@@ -294,14 +299,11 @@ for message in st.session_state.messages:
                         )
 
                         st.markdown(
-                            f"**Similarity:** **{similarity_percent:.2f}%**"
+                            f"### 🎯 Chunk Confidence : {chunk_confidence:.2f}%"
                         )
 
                         st.progress(
-                            min(
-                                similarity_percent / 100,
-                                1.0,
-                            )
+                            min(chunk_confidence / 100, 1.0)
                         )
 
                         st.markdown(
@@ -324,10 +326,11 @@ for message in st.session_state.messages:
                         c1, c2, c3 = st.columns(3)
 
                         c1.metric(
-                            "Page",
-                            cite.get(
-                                "page_number",
-                                "-",
+                            "Pages",
+                            (
+                                str(cite["page_start"])
+                                if cite.get("page_start") == cite.get("page_end")
+                                else f'{cite.get("page_start")} - {cite.get("page_end")}'
                             ),
                         )
 
@@ -408,10 +411,81 @@ if prompt := st.chat_input(
                     data = response.json()
 
                     answer = data.get("answer", "No answer returned.")
-
                     citations = data.get("citations", [])
 
+                    confidence = data.get("confidence", 0.0)
+                    pipeline_time = data.get("pipeline_time", 0.0)
+                    search_time = data.get("search_time", 0.0)
+                    rerank_time = data.get("rerank_time", 0.0)
+                    context_time = data.get("context_time", 0.0)
+                    llm_time = data.get("llm_time", 0.0)
+
                     st.write(answer)
+
+                    st.divider()
+
+                    st.subheader("📊 Answer Quality")
+
+                    c1, c2 = st.columns(2)
+
+                    c1.metric(
+                        "Confidence",
+                        f"{confidence:.2f}%",
+                    )
+
+                    c2.progress(
+                        min(confidence / 100, 1.0)
+                    )
+
+                    if confidence >= 90:
+                        st.success("Excellent confidence")
+
+                    elif confidence >= 75:
+                        st.success("High confidence")
+
+                    elif confidence >= 60:
+                        st.warning("Medium confidence")
+
+                    elif confidence >= 40:
+                        st.warning("Low confidence")
+
+                    else:
+                        st.error("Very Low confidence")
+
+                    st.divider()
+
+                    # st.subheader("⚡ Pipeline Performance")
+
+                    # c1, c2, c3 = st.columns(3)
+
+                    # c1.metric(
+                    #     "Search",
+                    #     f"{search_time:.2f}s",
+                    # )
+
+                    # c2.metric(
+                    #     "Reranker",
+                    #     f"{rerank_time:.2f}s",
+                    # )
+
+                    # c3.metric(
+                    #     "Context",
+                    #     f"{context_time:.2f}s",
+                    # )
+
+                    # c4, c5 = st.columns(2)
+
+                    # c4.metric(
+                    #     "LLM",
+                    #     f"{llm_time:.2f}s",
+                    # )
+
+                    # c5.metric(
+                    #     "Total",
+                    #     f"{pipeline_time:.2f}s",
+                    # )
+
+                    # st.divider()
 
                     if citations:
 
@@ -422,14 +496,22 @@ if prompt := st.chat_input(
 
                             for idx, cite in enumerate(citations, start=1):
 
+                                chunk_confidence = cite.get("chunk_confidence", 0.0)
+
                                 similarity = float(
                                     cite.get("similarity", 0.0)
                                 )
 
-                                similarity_percent = (
-                                    similarity * 100
-                                    if similarity <= 1
-                                    else similarity
+                                rerank = float(
+                                    cite.get("rerank_score", 0.0)
+                                )
+
+                                keyword = float(
+                                    cite.get("keyword_score", 0.0)
+                                )
+
+                                rrf = float(
+                                    cite.get("rrf_score", 0.0)
                                 )
 
                                 st.markdown(
@@ -437,11 +519,11 @@ if prompt := st.chat_input(
                                 )
 
                                 st.markdown(
-                                    f"**Similarity:** **{similarity_percent:.2f}%**"
+                                    f"### 🎯 Chunk Confidence : {chunk_confidence:.2f}%"
                                 )
 
                                 st.progress(
-                                    min(similarity_percent / 100, 1.0)
+                                    min(chunk_confidence / 100, 1.0)
                                 )
 
                                 st.markdown(
@@ -466,8 +548,12 @@ if prompt := st.chat_input(
                                 col1, col2, col3 = st.columns(3)
 
                                 col1.metric(
-                                    "Page",
-                                    cite["page_number"],
+                                    "Pages",
+                                    (
+                                        str(cite["page_start"])
+                                        if cite.get("page_start") == cite.get("page_end")
+                                        else f'{cite.get("page_start")} - {cite.get("page_end")}'
+                                    ),
                                 )
 
                                 col2.metric(
@@ -484,6 +570,28 @@ if prompt := st.chat_input(
                                     f"📄 {cite['pdf_name']}"
                                 )
 
+                                c1, c2, c3, c4 = st.columns(4)
+
+                                c1.metric(
+                                    "Similarity",
+                                    f"{similarity:.4f}",
+                                )
+
+                                c2.metric(
+                                    "Rerank",
+                                    f"{rerank:.4f}",
+                                )
+
+                                c3.metric(
+                                    "Keyword",
+                                    f"{keyword:.4f}",
+                                )
+
+                                c4.metric(
+                                    "RRF",
+                                    f"{rrf:.4f}",
+                                )
+
                                 st.divider()
 
                     st.session_state.messages.append(
@@ -491,6 +599,8 @@ if prompt := st.chat_input(
                             "role": "assistant",
                             "content": answer,
                             "citations": citations,
+                            "confidence": confidence,
+                            "pipeline_time": pipeline_time,
                         }
                     )
 

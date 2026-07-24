@@ -12,6 +12,7 @@ from .bm25_service import BM25SearchService
 from .hybrid_search_service import HybridSearchService
 from .reranker_service import RerankerService
 from .rag_service import RAGService
+from .guardrail_service import GuardrailService
 
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "HybridSearchService",
     "RerankerService",
     "RAGService",
+    "GuardrailService",
 ]

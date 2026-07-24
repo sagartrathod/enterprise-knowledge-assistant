@@ -1,8 +1,12 @@
-# app/services/llm_service.py
-
 from __future__ import annotations
 
+import time
+
 from app.core.config import settings
+from app.core.constants import (
+    DEFAULT_NO_ANSWER,
+    LOG_PROMPT,
+)
 from app.core.logger import logger
 from app.llm.groq import GroqClient
 from app.services.prompt_service import PromptService
@@ -15,31 +19,28 @@ class LLMService:
     Responsibilities
     ----------------
     - Validate LLM configuration.
-    - Build prompts using PromptService.
-    - Call the configured LLM provider.
-    - Return grounded responses.
-
-    This service is provider-agnostic. Prompt construction and model
-    invocation are delegated to dedicated components.
+    - Build prompts.
+    - Invoke the configured LLM.
+    - Return grounded answers.
     """
 
     def __init__(
         self,
         prompt_service: PromptService,
     ) -> None:
-        """
-        Initialize the LLM service.
-
-        Args:
-            prompt_service:
-                Service responsible for prompt construction.
-        """
 
         if not settings.GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY is missing.")
+            raise ValueError(
+                "GROQ_API_KEY is missing."
+            )
 
         self.prompt_service = prompt_service
+
         self.engine = GroqClient()
+
+        logger.info(
+            "LLM Service initialized successfully."
+        )
 
     async def generate_response(
         self,
@@ -47,34 +48,134 @@ class LLMService:
         question: str,
     ) -> str:
         """
-        Generate a grounded answer from retrieved document chunks.
-
-        Args:
-            context_chunks:
-                Retrieved chunks selected for the prompt.
-
-            question:
-                User question.
-
-        Returns:
-            Generated answer from the LLM.
+        Generate grounded response.
         """
 
+        logger.info("=" * 100)
+        logger.info("LLM GENERATION")
+        logger.info("=" * 100)
+
         logger.info(
-            "Generating LLM response using %d context chunks.",
+            "Question: %s",
+            question,
+        )
+
+        logger.info(
+            "Context Chunks: %d",
             len(context_chunks),
         )
 
-        system_prompt, user_prompt = self.prompt_service.build(
-            context_chunks=context_chunks,
-            question=question,
+        if not context_chunks:
+
+            logger.warning(
+                "No context chunks supplied."
+            )
+
+            return DEFAULT_NO_ANSWER
+
+        # -----------------------------------------------------
+        # Build Prompt
+        # -----------------------------------------------------
+
+        system_prompt, user_prompt = (
+            self.prompt_service.build(
+                context_chunks=context_chunks,
+                question=question,
+            )
         )
 
-        answer = await self.engine.generate_answer(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
+        logger.info(
+            "Prompt generated successfully."
         )
 
-        logger.info("LLM response generated successfully.")
+        logger.info(
+            "System Prompt Length : %d",
+            len(system_prompt),
+        )
+
+        logger.info(
+            "User Prompt Length : %d",
+            len(user_prompt),
+        )
+
+        logger.info(
+            "Total Prompt Length : %d",
+            len(system_prompt) + len(user_prompt),
+        )
+
+        if LOG_PROMPT:
+
+            logger.debug("=" * 100)
+            logger.debug("SYSTEM PROMPT")
+            logger.debug("=" * 100)
+            logger.debug(system_prompt)
+
+            logger.debug("=" * 100)
+            logger.debug("USER PROMPT")
+            logger.debug("=" * 100)
+            logger.debug(user_prompt)
+
+        # -----------------------------------------------------
+        # LLM Call
+        # -----------------------------------------------------
+
+        start = time.perf_counter()
+
+        try:
+
+            answer = await self.engine.generate_answer(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+
+        except Exception:
+
+            logger.exception(
+                "LLM generation failed."
+            )
+
+            raise
+
+        elapsed = time.perf_counter() - start
+
+        logger.info(
+            "LLM execution time: %.2f sec",
+            elapsed,
+        )
+
+        # -----------------------------------------------------
+        # Validate Response
+        # -----------------------------------------------------
+
+        if answer is None:
+
+            logger.warning(
+                "LLM returned None."
+            )
+
+            return DEFAULT_NO_ANSWER
+
+        answer = answer.strip()
+
+        if not answer:
+
+            logger.warning(
+                "LLM returned empty response."
+            )
+
+            return DEFAULT_NO_ANSWER
+
+        logger.info(
+            "Answer Length: %d characters",
+            len(answer),
+        )
+
+        logger.info("=" * 100)
+        logger.info("LLM RESPONSE")
+        logger.info("=" * 100)
+
+        logger.info("%s", answer)
+
+        logger.info("=" * 100)
 
         return answer

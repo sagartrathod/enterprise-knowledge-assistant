@@ -12,7 +12,9 @@ SELECT
 
     dc.chunk_number,
 
-    dc.page_number,
+    dc.page_start,
+
+    dc.page_end,
 
     dc.line_start,
 

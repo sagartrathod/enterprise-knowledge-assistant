@@ -15,3 +15,5 @@ Create a `.env` file in the root workspace following the reference blueprint:
 ```bash
 cp .env.example .env
 # Edit .env and supply your GOOGLE_API_KEY or OPENAI_API_KEY
+
+i want 75 % output as answer from chunk 1 and remaining from chunk 2 and other

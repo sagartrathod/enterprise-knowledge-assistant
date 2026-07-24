@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from app.core.constants import EMBEDDING_MODEL
+from app.core.logger import logger
+
 from sentence_transformers import SentenceTransformer
 
 
@@ -6,9 +11,19 @@ class EmbeddingService:
     Service responsible for generating embeddings.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+
+        logger.info(
+            "Loading embedding model: %s",
+            EMBEDDING_MODEL,
+        )
+
         self.model = SentenceTransformer(
-            "sentence-transformers/all-MiniLM-L6-v2"
+            EMBEDDING_MODEL,
+        )
+
+        logger.info(
+            "Embedding model loaded successfully."
         )
 
     async def get_embedding(
@@ -22,6 +37,7 @@ class EmbeddingService:
         embedding = self.model.encode(
             text,
             normalize_embeddings=True,
+            convert_to_numpy=True,
         )
 
         return embedding.tolist()

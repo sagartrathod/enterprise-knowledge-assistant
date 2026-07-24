@@ -38,7 +38,8 @@ INSERT INTO conversation_history_citations
     document_id,
     pdf_name,
     chunk_number,
-    page_number,
+    page_start,
+    page_end,
     line_start,
     line_end,
     similarity,
@@ -54,7 +55,8 @@ VALUES
     $6,
     $7,
     $8,
-    $9
+    $9,
+    $10
 );
 """
 
@@ -82,15 +84,26 @@ SELECT
                 'document_id', chc.document_id,
                 'pdf_name', chc.pdf_name,
                 'chunk_number', chc.chunk_number,
-                'page_number', chc.page_number,
+
+                'page_start', chc.page_start,
+                'page_end', chc.page_end,
+
                 'line_start', chc.line_start,
                 'line_end', chc.line_end,
-                'similarity', ROUND(COALESCE(chc.similarity, 0)::numeric, 4),
+
+                'similarity',
+                ROUND(
+                    COALESCE(chc.similarity, 0)::numeric,
+                    4
+                ),
+
                 'chunk_text', chc.chunk_text
 
             )
 
-            ORDER BY chc.chunk_number
+            ORDER BY
+                chc.page_start,
+                chc.chunk_number
 
         ),
 

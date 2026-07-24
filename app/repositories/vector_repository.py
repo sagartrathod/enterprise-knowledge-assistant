@@ -4,9 +4,9 @@ from asyncpg import Pool
 
 from app.core.logger import logger
 from app.sql import (
-    UPDATE_CHUNK_EMBEDDING,
-    SEMANTIC_TOP_K_RETRIEVAL,
     BM25_SEARCH,
+    SEMANTIC_TOP_K_RETRIEVAL,
+    UPDATE_CHUNK_EMBEDDING,
 )
 
 
@@ -16,9 +16,9 @@ class VectorRepository:
 
     Responsibilities
     ----------------
-    - Store embeddings in pgvector
+    - Store embeddings
     - Semantic vector search
-    - BM25 / PostgreSQL Full Text Search
+    - PostgreSQL Full Text Search
     """
 
     def __init__(
@@ -36,7 +36,7 @@ class VectorRepository:
         embedding: list[float],
     ) -> str:
         """
-        Convert Python embedding list into pgvector format.
+        Convert Python embedding into pgvector format.
         """
 
         if not embedding:
@@ -56,7 +56,7 @@ class VectorRepository:
         embedding: list[float],
     ) -> None:
         """
-        Store embedding for a document chunk.
+        Save embedding into pgvector column.
         """
 
         vector = self._format_vector(
@@ -83,11 +83,14 @@ class VectorRepository:
     async def semantic_search(
         self,
         query_embedding: list[float],
-        top_k: int = 20,
+        question: str,
+        top_k: int,
         document_id: str | None = None,
     ) -> list[dict]:
         """
-        Perform semantic search using pgvector.
+        Semantic vector retrieval.
+
+        SQL already returns results ordered by similarity.
         """
 
         vector = self._format_vector(
@@ -101,14 +104,46 @@ class VectorRepository:
                 vector,
                 top_k,
                 document_id,
+                question,
             )
+
+        results: list[dict] = []
+
+        for row in rows:
+
+            chunk = dict(row)
+
+            chunk["distance"] = float(
+                chunk.get("distance", 0.0)
+            )
+
+            chunk["similarity"] = float(
+                chunk.get("similarity", 0.0)
+            )
+
+            chunk["keyword_score"] = float(
+                chunk.get("keyword_score", 0.0)
+            )
+
+            results.append(chunk)
 
         logger.info(
             "Semantic search returned %d chunks.",
-            len(rows),
+            len(results),
         )
 
-        return [dict(row) for row in rows]
+        if results:
+
+            logger.info(
+                "Top Semantic Chunk | Similarity=%.4f | "
+                "Keyword=%.4f | Pages=%s-%s | Chunk=%s",
+                results[0]["similarity"],
+                results[0]["keyword_score"],
+                results[0]["page_start"],
+                results[0]["page_end"],
+                results[0]["chunk_number"],
+            )
+        return results
 
     # ==========================================================
     # Backward Compatibility
@@ -117,18 +152,17 @@ class VectorRepository:
     async def search_top_k(
         self,
         embedding: list[float],
-        top_k: int = 20,
+        question: str,
+        top_k: int,
         document_id: str | None = None,
     ) -> list[dict]:
         """
-        Backward-compatible wrapper.
-
-        Older services call search_top_k().
-        Internally this delegates to semantic_search().
+        Wrapper for semantic search.
         """
 
         return await self.semantic_search(
             query_embedding=embedding,
+            question=question,
             top_k=top_k,
             document_id=document_id,
         )
@@ -140,11 +174,11 @@ class VectorRepository:
     async def bm25_search(
         self,
         query: str,
-        top_k: int = 20,
+        top_k: int,
         document_id: str | None = None,
     ) -> list[dict]:
         """
-        PostgreSQL Full-Text Search.
+        PostgreSQL Full Text Search.
         """
 
         async with self.pool.acquire() as conn:
@@ -156,9 +190,32 @@ class VectorRepository:
                 document_id,
             )
 
+        results = []
+
+        for row in rows:
+
+            chunk = dict(row)
+
+            chunk["bm25_score"] = float(
+                chunk.get("bm25_score", 0.0)
+            )
+
+            results.append(chunk)
+
         logger.info(
             "BM25 search returned %d chunks.",
-            len(rows),
+            len(results),
         )
 
-        return [dict(row) for row in rows]
+        if results:
+
+            logger.info(
+                "Top BM25 Chunk | Score=%.4f | "
+                "Pages=%s-%s | Chunk=%s",
+                results[0]["bm25_score"],
+                results[0]["page_start"],
+                results[0]["page_end"],
+                results[0]["chunk_number"],
+            )
+
+        return results
